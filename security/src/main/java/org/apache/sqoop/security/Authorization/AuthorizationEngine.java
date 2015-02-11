@@ -25,9 +25,11 @@ import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.delegation.web.HttpUserGroupInformation;
 import org.apache.log4j.Logger;
 import org.apache.sqoop.common.SqoopException;
+import org.apache.sqoop.core.SqoopConfiguration;
 import org.apache.sqoop.model.*;
 import org.apache.sqoop.security.AuthorizationHandler;
 import org.apache.sqoop.security.AuthorizationManager;
+import org.apache.sqoop.security.SecurityConstants;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -36,6 +38,12 @@ import java.util.List;
 public class AuthorizationEngine {
 
   private static final Logger LOG = Logger.getLogger(AuthorizationEngine.class);
+
+  private static final String DEFAULT_SERVER_NAME = "sqoop_server";
+
+  // server_name is used to identify sqoop server in case there are multi sqoop servers in the cluster
+  private static final String SERVER_NAME = SqoopConfiguration.getInstance().getContext().getString(
+          SecurityConstants.SERVER_NAME, DEFAULT_SERVER_NAME).trim();
 
   /**
    * Role type
@@ -48,14 +56,14 @@ public class AuthorizationEngine {
    * Resource type
    */
   public enum ResourceType {
-    CONNECTOR, LINK, JOB
+    SERVER, CONNECTOR, LINK, JOB
   }
 
   /**
    * Action type in Privilege
    */
   public enum PrivilegeActionType {
-    VIEW, USE, CREATE, UPDATE, DELETE, ENABlE_DISABLE, START_STOP, STATUS
+    ALL, CREATE, READ, WRITE
   }
 
   /**
@@ -67,7 +75,7 @@ public class AuthorizationEngine {
       public boolean apply(T input) {
         try {
           String name = String.valueOf(input.getPersistenceId());
-          checkPrivilege(getPrivilege(type, name, PrivilegeActionType.VIEW));
+          checkPrivilege(getPrivilege(type, name, PrivilegeActionType.READ));
           // add valid resource
           return true;
         } catch (Exception e) {
@@ -83,63 +91,61 @@ public class AuthorizationEngine {
    * Link related function
    */
   public static void createLink(String connectorId) throws SqoopException {
-    MPrivilege privilege1 = getPrivilege(ResourceType.CONNECTOR, connectorId, PrivilegeActionType.USE);
-    // resource id is empty, means it is a global privilege
-    MPrivilege privilege2 = getPrivilege(ResourceType.LINK, StringUtils.EMPTY, PrivilegeActionType.CREATE);
+    MPrivilege privilege1 = getPrivilege(ResourceType.CONNECTOR, connectorId, PrivilegeActionType.READ);
+    MPrivilege privilege2 = getPrivilege(ResourceType.SERVER, SERVER_NAME, PrivilegeActionType.CREATE);
     checkPrivilege(privilege1, privilege2);
   }
 
   public static void updateLink(String connectorId, String linkId) throws SqoopException {
-    MPrivilege privilege1 = getPrivilege(ResourceType.CONNECTOR, connectorId, PrivilegeActionType.USE);
-    MPrivilege privilege2 = getPrivilege(ResourceType.LINK, linkId, PrivilegeActionType.UPDATE);
+    MPrivilege privilege1 = getPrivilege(ResourceType.CONNECTOR, connectorId, PrivilegeActionType.READ);
+    MPrivilege privilege2 = getPrivilege(ResourceType.LINK, linkId, PrivilegeActionType.WRITE);
     checkPrivilege(privilege1, privilege2);
   }
 
   public static void deleteLink(String linkId) throws SqoopException {
-    checkPrivilege(getPrivilege(ResourceType.LINK, linkId, PrivilegeActionType.DELETE));
+    checkPrivilege(getPrivilege(ResourceType.LINK, linkId, PrivilegeActionType.WRITE));
   }
 
   public static void enableDisableLink(String linkId) throws SqoopException {
-    checkPrivilege(getPrivilege(ResourceType.LINK, linkId, PrivilegeActionType.ENABlE_DISABLE));
+    checkPrivilege(getPrivilege(ResourceType.LINK, linkId, PrivilegeActionType.WRITE));
   }
 
   /**
    * Job related function
    */
   public static void createJob(String linkId1, String linkId2) throws SqoopException {
-    MPrivilege privilege1 = getPrivilege(ResourceType.LINK, linkId1, PrivilegeActionType.USE);
-    MPrivilege privilege2 = getPrivilege(ResourceType.LINK, linkId2, PrivilegeActionType.USE);
-    // resource id is empty, means it is a global privilege
-    MPrivilege privilege3 = getPrivilege(ResourceType.JOB, StringUtils.EMPTY, PrivilegeActionType.CREATE);
+    MPrivilege privilege1 = getPrivilege(ResourceType.LINK, linkId1, PrivilegeActionType.READ);
+    MPrivilege privilege2 = getPrivilege(ResourceType.LINK, linkId2, PrivilegeActionType.READ);
+    MPrivilege privilege3 = getPrivilege(ResourceType.SERVER, SERVER_NAME, PrivilegeActionType.CREATE);
     checkPrivilege(privilege1, privilege2, privilege3);
   }
 
   public static void updateJob(String linkId1, String linkId2, String jobId) throws SqoopException {
-    MPrivilege privilege1 = getPrivilege(ResourceType.LINK, linkId1, PrivilegeActionType.USE);
-    MPrivilege privilege2 = getPrivilege(ResourceType.LINK, linkId2, PrivilegeActionType.USE);
-    MPrivilege privilege3 = getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.UPDATE);
+    MPrivilege privilege1 = getPrivilege(ResourceType.LINK, linkId1, PrivilegeActionType.READ);
+    MPrivilege privilege2 = getPrivilege(ResourceType.LINK, linkId2, PrivilegeActionType.READ);
+    MPrivilege privilege3 = getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.WRITE);
     checkPrivilege(privilege1, privilege2, privilege3);
   }
 
   public static void deleteJob(String jobId) throws SqoopException {
-    checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.DELETE));
+    checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.WRITE));
   }
 
   public static void enableDisableJob(String jobId) throws SqoopException {
-    checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.ENABlE_DISABLE));
+    checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.WRITE));
   }
 
   public static void startJob(String jobId) throws SqoopException {
     ;
-    checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.START_STOP));
+    checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.WRITE));
   }
 
   public static void stopJob(String jobId) throws SqoopException {
-    checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.START_STOP));
+    checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.WRITE));
   }
 
   public static void statusJob(String jobId) throws SqoopException {
-    checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.STATUS));
+    checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.READ));
   }
 
   /**
@@ -151,7 +157,7 @@ public class AuthorizationEngine {
       public boolean apply(MSubmission input) {
         try {
           String jobId = String.valueOf(input.getJobId());
-          checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.STATUS));
+          checkPrivilege(getPrivilege(ResourceType.JOB, jobId, PrivilegeActionType.READ));
           // add valid submission
           return true;
         } catch (Exception e) {
@@ -169,9 +175,6 @@ public class AuthorizationEngine {
   private static MPrivilege getPrivilege(ResourceType resourceType,
                                          String resourceId,
                                          PrivilegeActionType privilegeActionType) {
-    // Do a transfer. "all" means global instances in Restful API, whilst empty
-    // string means global instances in role based access controller.
-    resourceId = (resourceId == null || resourceId.equals("all")) ? StringUtils.EMPTY : resourceId;
     return new MPrivilege(new MResource(resourceId, resourceType.name()), privilegeActionType.name(), false);
   }
 
